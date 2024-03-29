@@ -1,0 +1,15 @@
+setup.py
+Core/FisheyeCam.py
+Core/__init__.py
+Core/birdview.py
+Core/dataset.py
+Core/file_utils.py
+Core/params.py
+Core/point_selector.py
+Core/texture_extractor.py
+Core/utils.py
+avmg.egg-info/PKG-INFO
+avmg.egg-info/SOURCES.txt
+avmg.egg-info/dependency_links.txt
+avmg.egg-info/requires.txt
+avmg.egg-info/top_level.txt

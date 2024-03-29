@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: avmg
+Version: 0.0.1
+Summary: Fisheye Camera Calibration Toolbox
+Author: 6635120
+Author-email: luo.kuncheng@byd.com
+License: AGPL-3.0
+Requires-Python: >=3.8
+Requires-Dist: numpy
+Requires-Dist: opencv-python
+Requires-Dist: tqdm
