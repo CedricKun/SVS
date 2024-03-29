@@ -5,7 +5,6 @@
 
 System::System(const char *argv[], size_t num):mConfigPath(argv[1]), mSavePath(argv[2]), mNumViews(num)
 {
-    mAVM = new cv::Mat(total_h, total_w, CV_32FC3);
 
     if(access(mSavePath.data(), 0)){
         char p[300] = "mkdir -p ";
@@ -13,7 +12,7 @@ System::System(const char *argv[], size_t num):mConfigPath(argv[1]), mSavePath(a
         system(strcat(p, mSavePath.c_str()));
     }
     // std::cout << "System before loady OK" << std::endl;
-    // LoadWeights();
+    LoadWeights();
     
     // std::cout << "System load OK" << std::endl;
     for(size_t i = 0; i < mNumViews; ++i){
@@ -29,8 +28,8 @@ System::~System(){}
 
 void System::StitchImg()
 {   
-    std::vector<cv::cuda::GpuMat*> views_, out_;
-    views_.reserve(mNumViews);
+    std::vector<cv::cuda::GpuMat> views_(4, cv::cuda::GpuMat(mResolution.height, mResolution.width, CV_32FC3));
+    std::vector<cv::cuda::GpuMat> out_;
     out_.reserve(mNumViews);
 
     for (size_t i = 0; i < mCaps.size(); i++)
@@ -46,25 +45,18 @@ void System::StitchImg()
     int idx = 0;
     char path[300];
 
-
     while(1)
     {   
         cv::cuda::GpuMat AVM(total_h, total_w, CV_32FC3, cv::Scalar(0, 0, 0));
         std::cout << "frame id " << idx << " start stitching at: " << ComputeTime() << std::endl;
 
         for(size_t i = 0; i < mNumViews; ++i){
-            cv::cuda::GpuMat *v;
-            v = mCaps[i]->GetImage();
+            cv::cuda::GpuMat v;
+            mCaps[i]->GetImage(views_[i]);
             // std::cout << v->size() << std::endl;
-            if(!v){
-                std::cerr << "fail to get image from dequeue!\n";
-            }
-            else{
-                // std::cout << "successfully get image from dequeue at " << ComputeTime() << std::endl;
-            }
             // std::cout << v->size() << std::endl;
-            v->convertTo(*v, CV_32FC3);
-            views_[i] = v;
+            // v.convertTo(v, CV_32FC3);
+            // views_[i] = v;
             // cv::Mat tmp;
             // views_[i]->download(tmp);
             // tmp.convertTo(tmp, CV_32FC3, 1.0/255.0);
@@ -77,9 +69,8 @@ void System::StitchImg()
             // std::cout << views_[i]->size() << std::endl;
             // std::cout << mWeights[i].size() << std::endl;
             // std::cout << out_[i]->size() << std::endl;
-            cv::cuda::multiply(*views_[i], mWeights[i], *out_[i]);
+            cv::cuda::multiply(views_[i], mWeights[i], *out_[i]);
 
-            delete views_[i];
         }
         // std::cout << "before add is ok!\n";
         // std::cout << out_[0]->size() << " " << AVM(f).size() << std::endl;
@@ -94,9 +85,9 @@ void System::StitchImg()
         cv::cuda::add(*out_[2], AVM(b), AVM(b));
         cv::cuda::add(*out_[3], AVM(r), AVM(r));
 
-        AVM.download(*mAVM);
+        AVM.download(mAVM);
         sprintf(path, "%s%d.jpg", mSavePath.c_str(), idx);
-        std::cout << path << std::endl;
+        // std::cout << path << std::endl;
         cv::imwrite(path, *mAVM);
         std::cout << "frame id " << idx++ << " finish stitching at: " << ComputeTime() << "\n";
 
@@ -221,26 +212,8 @@ void System::LoadWeights()
 
 void System::Start()
 {
-    // std::vector<std::thread> threads;
-    // for (size_t i = 0; i < mNumViews; i++)
-    // {
-    //     threads.emplace_back(std::thread(&VideoCap::Run, mCaps[i]));
-    //     cpu_set_t cpuset;
-    //     CPU_ZERO(&cpuset);
-    //     CPU_SET(i, &cpuset);
-    //     int rc = pthread_setaffinity_np(threads[i].native_handle(),
-    //                                     sizeof(cpu_set_t), &cpuset);
-    //     if (rc != 0) {
-    //         std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    //     }
-    // }
-    // sleep(10);
-    // std::thread *stitcher = new std::thread(&System::StitchImg, this);
-    // threads.emplace_back(stitcher);
-    // for(size_t i = 0; i < mNumViews + 1; i++){
-    //     threads[i].join();
-    // }
-    while(1){}
+
+    while(1){}      // uncomment it if save images
     StitchImg();
 
 }

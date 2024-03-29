@@ -11,17 +11,17 @@ class VideoCap
 {
 public:
 
+    cv::cuda::GpuMat mFrame;
     cv::cuda::GpuMat mMap1, mMap2;  // for undistort
-    cv::cuda::GpuMat mMapx, mMapy;  // for warpPerspective  
-    // cv::cuda::GpuMat mProjectMat;
     cv::Mat mProjectMat;
     cv::Size mResolution;   
+    cv::Size mShape;
 
     VideoCap();
     VideoCap(const char *c, const std::string &n, const std::string &cp, const std::string &sp);
     ~VideoCap();
 
-    cv::cuda::GpuMat* GetImage();
+    void GetImage(cv::cuda::GpuMat &f);
     void SetStop();
     void Run();
     void GetUndistortMap(cv::Mat camera_matrix_,
@@ -33,9 +33,8 @@ public:
 private:
     friend class System;
 
-    mutable std::mutex mmBgr_;
-    mutable std::mutex mmPro_;
     mutable std::mutex iomutex;
+    std::condition_variable cv;
 
     const char * mId_;
     std::string mName_;
@@ -43,10 +42,7 @@ private:
     std::string mSavePathRaw_;
 
     bool mbStop_;
-
-    std::deque<cv::Mat*> *mBgrs_;
-    std::deque<cv::cuda::GpuMat*> *mPros_;
-
+    bool mbRead_;
 };
 
 

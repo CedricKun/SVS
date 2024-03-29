@@ -12,14 +12,15 @@ VideoCap::VideoCap(const char *c,
                    const std::string &n, 
                    const std::string &cp, 
                    const std::string &sp):
-                   mId_(c), mName_(n), mConfigPath_(cp), 
-                   mSavePathRaw_(sp), mbStop_(false){
+                   mId_(c), mName_(n), mConfigPath_(cp), mSavePathRaw_(sp), 
+                   mbStop_(false){
         mConfigPath_ = mConfigPath_ + mName_ + ".yaml";
         mSavePathRaw_ = mSavePathRaw_ + mName_ + "/";
 
         ParseConfig();
-        mBgrs_ = new std::deque<cv::Mat*>();
-        mPros_ = new std::deque<cv::cuda::GpuMat*>();
+
+        mShape = project_shapes.at(mName_);
+        mpFrame = new cv::cuda::GpuMat(mResolution.height, mResolution.width, CV_32FC3);
     }
 
 void VideoCap::ParseConfig(){
@@ -39,16 +40,14 @@ void VideoCap::ParseConfig(){
     cv::Mat camera_matrix_ = fConfig["camera_matrix"].mat();
     cv::Mat dist_coeffs_ = fConfig["dist_coeffs"].mat();
     cv::Mat project_matrix_ = fConfig["project_matrix"].mat();
+
     auto r = fConfig["resolution"].mat();
     mResolution = cv::Size(r.at<int>(0), r.at<int>(1));
     cv::Mat scale_xy_ = fConfig["scale_xy"].mat();
     cv::Mat shift_xy_ = fConfig["shift_xy"].mat();
-    GetUndistortMap(camera_matrix_,
-                    dist_coeffs_,
-                    scale_xy_,
-                    shift_xy_);
+    GetUndistortMap(camera_matrix_, dist_coeffs_, scale_xy_, shift_xy_);
+
     mProjectMat = project_matrix_;
-    cv::cuda::buildWarpPerspectiveMaps(project_matrix_, false, mResolution, mMapx, mMapy);
     fConfig.release();
     // cout << "Finish Parsing Config\n";
 }
@@ -75,54 +74,51 @@ void VideoCap::Run()
     // printf("%d  %d", mResolution.height, mResolution.width);
     cv::cuda::GpuMat frame_in(mResolution.height, mResolution.width, CV_32FC3);
     cv::cuda::GpuMat frame_out(mResolution.height, mResolution.width, CV_32FC3);
+    cv::cuda::GpuMat frame_pro(mResolution.height, mResolution.width, CV_32FC3);
 	/*
 	 * processing loop
 	 */
     while(cap.isOpened() && !mbStop_)
     {
-        cv::cuda::GpuMat *frame_pro = new cv::cuda::GpuMat(mResolution.height, mResolution.width, CV_32FC3);
+        mFrame = frame_pro;
         // std::cout << frame_pro->size() << std::endl;
-        cv::Mat *frame = new cv::Mat(); 
+        cv::Mat frame; 
 
 		// capture next image
-        cap >> *frame; 
+        cap >> frame; 
+
+		// save result
+        sprintf(ad, "%s%s.jpg", mSavePathRaw_.c_str(), t.c_str());
+        // std::cout << ad << std::endl;
+        if(frame_id % 1 == 0) imwrite(ad, frame);
 
 		// log timing
         std::string t = ComputeTime();
         std::cout <<  mName_ << " frame id " << frame_id++ << " captured at: " << t << std::endl;
 
-        // pass &frame to dequeue
-
-
         // processing frames on G
-        frame_in.upload(*frame);
+        frame_in.upload(frame);
         cv::cuda::remap(frame_in, frame_out, mMap1, mMap2, cv::INTER_LINEAR, cv::BORDER_CONSTANT);
-        cv::cuda::warpPerspective(frame_out, *frame_pro, mProjectMat, project_shapes.at(mName_));
+
+        // thread-security
+        std::unique_lock<std::mutex> writeGuard(iomutex);
+        cv.wait(writeGuard, [](){return mbRead_ == true ? true : false});
+
+        cv::cuda::warpPerspective(frame_out, frame_pro, mProjectMat, mShape);
         if(mName_ == "left"){
-            cv::cuda::rotate(*frame_pro, *frame_pro, cv::Size(project_shapes.at(mName_).height, project_shapes.at(mName_).width),
-                             90, 0, project_shapes.at(mName_).width, cv::INTER_LINEAR);
+            cv::cuda::rotate(frame_pro, frame_pro, cv::Size(mShape.height, mShape.width),
+                             90, 0, mShape.width, cv::INTER_LINEAR);
         }
         else if(mName_ == "right"){
-            cv::cuda::rotate(*frame_pro, *frame_pro, cv::Size(project_shapes.at(mName_).height, project_shapes.at(mName_).width),
-                             -90, project_shapes.at(mName_).height - 1, 0, cv::INTER_LINEAR);
+            cv::cuda::rotate(frame_pro, frame_pro, cv::Size(mShape.height, mShape.width),
+                             -90, mShape.height - 1, 0, cv::INTER_LINEAR);
         }
         else if(mName_ == "back"){
-            cv::cuda::rotate(*frame_pro, *frame_pro, cv::Size(project_shapes.at(mName_)),
-                             180, 0, 0, cv::INTER_LINEAR);
+            cv::cuda::flip(frame_pro, frame_pro, -1);
         }
+        mbRead_ = false;
+        cv.notify_one;
 
-		// save result
-        sprintf(ad, "%s%s.jpg", mSavePathRaw_.c_str(), t.c_str());
-        // std::cout << ad << std::endl;
-        if(frame_id % 1 == 0) imwrite(ad, *frame);
-
-        // pass &frame_pro to dequeue
-        {
-            std::lock_guard<std::mutex> l(mmPro_);
-            mPros_->emplace_back(frame_pro);
-        }
-        delete frame;
-        if(frame_id == 10) SetStop();
     }
 
     timeFile.close();
@@ -134,21 +130,14 @@ void VideoCap::SetStop(){
     mbStop_ = true;
 }
 
-cv::cuda::GpuMat* VideoCap::GetImage()
+void VideoCap::GetImage(cv::cuda::GpuMat &f)
 {
-    cv::cuda::GpuMat* frame;
-    while(mPros_->empty())
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    {
-        std::lock_guard<std::mutex> lG(mmPro_);
-        frame = mPros_->front();
-        // std::cout << frame->size() << std::endl;
-        mPros_->pop_front();
-    }
- 
-    return frame;
+    std::unique_lock<std::mutex> writeGuard(iomutex);
+    cv.wait(writeGuard, [](){return mbRead_ == false ? true : false});
+    mbRead_ = true;
+    mFrame.copyTo(f);
+    cv.notify_one;
+
 }
 
 void VideoCap::GetUndistortMap(cv::Mat camera_matrix_,

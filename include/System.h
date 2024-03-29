@@ -23,7 +23,7 @@ private:
     std::string mSavePath;
 
     std::vector<cv::cuda::GpuMat> mWeights;
-    cv::Mat *mAVM;
+    cv::Mat mAVM;
 
     size_t mNumViews;
 
