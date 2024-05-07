@@ -16,5 +16,5 @@ conda activate svs
 # 模块安装
 cd Calibration
 pip install -r requirements.txt
-python 
+python setup.py install
 ```
