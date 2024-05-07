@@ -8,7 +8,7 @@ SVS 是一个基于OpenCV的鱼眼相机标定与数据采集系统，包含主�
   
 #### Install
 
-···
+```
 # conda环境配置
 conda create -n svs python=3.9
 conda activate svs
@@ -17,4 +17,4 @@ conda activate svs
 cd Calibration
 pip install -r requirements.txt
 python 
-···
+```
